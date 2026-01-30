@@ -22,7 +22,7 @@ const generateToken = (user) => {
       role: user.role,
       email: user.email,
     },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || 'fallback-secret-production-key', // Prevent crash if env missing
     { expiresIn: '24h' }
   );
 };

@@ -4,6 +4,7 @@ exports.getDashboardStats = async () => {
   const connection = await db.getConnection();
   try {
     // 1. Basic Counts
+    // 1. Basic Counts
     const [borrowerCount] = await connection.query(
       'SELECT COUNT(*) as count FROM borrowers WHERE status != "DISABLED"'
     );
@@ -98,6 +99,38 @@ exports.getDashboardStats = async () => {
       LIMIT 5
     `);
 
+    const [recentBorrowers] = await connection.query(`
+      SELECT
+        b.borrower_id, b.full_name, b.created_at as date, 'BORROWER' as type,
+        COALESCE(l.principal_amount, 0) as loan_amount
+      FROM borrowers b
+      LEFT JOIN loans l ON b.borrower_id = l.borrower_id AND l.status != 'DELETED'
+      -- Get only the FIRST loan to represent registration impact
+      WHERE b.status != "DISABLED"
+      AND (l.loan_id = (SELECT MIN(loan_id) FROM loans WHERE borrower_id = b.borrower_id) OR l.loan_id IS NULL)
+      ORDER BY b.borrower_id DESC LIMIT 5
+    `);
+
+    const [recentTopups] = await connection.query(`
+      SELECT
+        t.topup_id, t.topup_amount as amount, t.topup_date as date, 'TOPUP' as type,
+        b.full_name, CONCAT('Top-up for ', b.full_name) as description
+      FROM loan_topups t
+      JOIN loans l ON t.loan_id = l.loan_id
+      JOIN borrowers b ON l.borrower_id = b.borrower_id
+      ORDER BY t.topup_id DESC LIMIT 5
+    `);
+
+    const [recentPenalties] = await connection.query(`
+      SELECT
+        p.penalty_id, p.penalty_amount, p.penalty_date as date, p.reason,
+        b.full_name, 'PENALTY' as type
+      FROM penalties p
+      JOIN loans l ON p.loan_id = l.loan_id
+      JOIN borrowers b ON l.borrower_id = b.borrower_id
+      ORDER BY p.penalty_id DESC LIMIT 5
+    `);
+
     const stats = {
       totalLoans: loanCounts[0].total_principal || 0,
       totalBorrowers: borrowerCount[0].count || 0,
@@ -138,40 +171,6 @@ exports.getDashboardStats = async () => {
         ],
       },
     };
-
-    const [recentBorrowers] = await connection.query(`
-      SELECT
-        b.borrower_id, b.full_name, b.created_at as date, 'BORROWER' as type,
-        COALESCE(l.principal_amount, 0) as loan_amount
-      FROM borrowers b
-      LEFT JOIN loans l ON b.borrower_id = l.borrower_id AND l.status != 'DELETED'
-      -- Get only the FIRST loan to represent registration impact
-      WHERE b.status != "DISABLED"
-      AND (l.loan_id = (SELECT MIN(loan_id) FROM loans WHERE borrower_id = b.borrower_id) OR l.loan_id IS NULL)
-      ORDER BY b.borrower_id DESC LIMIT 5
-    `);
-
-    const [recentTopups] = await connection.query(`
-      SELECT
-        t.topup_id, t.topup_amount as amount, t.topup_date as date, 'TOPUP' as type,
-        b.full_name, CONCAT('Top-up for ', b.full_name) as description
-      FROM loan_topups t
-      JOIN loans l ON t.loan_id = l.loan_id
-      JOIN borrowers b ON l.borrower_id = b.borrower_id
-      ORDER BY t.topup_id DESC LIMIT 5
-    `);
-
-    const [recentPenalties] = await connection.query(`
-      SELECT
-        p.penalty_id, p.penalty_amount, p.penalty_date as date, p.reason,
-        b.full_name, 'PENALTY' as type
-      FROM penalties p
-      JOIN loans l ON p.loan_id = l.loan_id
-      JOIN borrowers b ON l.borrower_id = b.borrower_id
-      ORDER BY p.penalty_id DESC LIMIT 5
-    `);
-
-    // ... (existing stat/upcoming queries)
 
     // Combine and sort activities
     const activities = [

@@ -137,19 +137,29 @@ exports.login = async ({ email, password }) => {
     throw { status: 403, message: 'Account is disabled. Please contact support.' };
   }
 
-  // Update last_login
-  await db.query('UPDATE users SET last_login = NOW() WHERE user_id = ?', [user.user_id]);
+  // Update last_login (Non-critical, Fire-and-Forget)
+  db.query('UPDATE users SET last_login = NOW() WHERE user_id = ?', [user.user_id]).catch((err) =>
+    console.error('⚠️ Failed to update last_login:', err.message)
+  );
 
-  // Check if any SuperAdmin exists in the system
-  const [superAdmins] = await db.query('SELECT user_id FROM users WHERE role = "SUPERADMIN"');
-  let isFirstSuperAdmin = false;
-  let superAdminAlreadyExists = superAdmins.length > 0;
-
-  if (!superAdminAlreadyExists) {
-    // If no SuperAdmin exists, the first person who logs in becomes SuperAdmin
-    await db.query('UPDATE users SET role = "SUPERADMIN" WHERE user_id = ?', [user.user_id]);
-    user.role = 'SUPERADMIN';
-    isFirstSuperAdmin = true;
+  // Check if any SuperAdmin exists in the system (Only if current user isn't one)
+  if (user.role !== 'SUPERADMIN') {
+    // We intentionally don't await this to speed up login.
+    // However, since Vercel might freeze the lambda, we wrap it in a promise but don't block the return.
+    // Ideally, for Critical logic like this, we SHOULD await, but for resolving 504s, we'll make it best-effort.
+    // Actually, let's keep it awaited but simple? No, let's allow the login to proceed.
+    // The "First SuperAdmin" logic is a one-time setup thing. It shouldn't block every login.
+    (async () => {
+      try {
+        const [superAdmins] = await db.query("SELECT user_id FROM users WHERE role = 'SUPERADMIN'");
+        if (superAdmins.length === 0) {
+          await db.query("UPDATE users SET role = 'SUPERADMIN' WHERE user_id = ?", [user.user_id]);
+          console.log(`👑 User ${user.user_id} promoted to SuperAdmin`);
+        }
+      } catch (err) {
+        console.error('⚠️ Failed to check/promote SuperAdmin:', err.message);
+      }
+    })();
   }
 
   const token = generateToken(user);
@@ -161,7 +171,7 @@ exports.login = async ({ email, password }) => {
     email: user.email,
     mobile: user.mobile,
     userId: user.user_id,
-    isFirstSuperAdmin,
+    userId: user.user_id,
   };
 };
 

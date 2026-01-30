@@ -32,28 +32,9 @@ exports.checkDailyPenalties = async () => {
 
   const connection = await db.getConnection();
   try {
-    /*
-    // --- LEGACY LOGIC START (For Future Reference) ---
-    // Previously, we used global settings and a hardcoded 20-day safety buffer.
-
-    const penaltyAmount = Number(settings.penalty_amount) || 50;
-    const penaltyDay = Number(settings.penalty_days) || 5;
-
-    // Grace Period Check:
-    if (dayOfMonth <= penaltyDay) return { message: 'Grace period' };
-
-    const [activeLoans] = await connection.query("SELECT ... FROM loans WHERE status = 'ACTIVE'");
-
-    for (const loan of activeLoans) {
-       const disbursementTime = new Date(loan.disbursement_date).getTime() + IST_OFFSET;
-       const currentMonthDueDate = new Date(today.getFullYear(), today.getMonth(), penaltyDay);
-       const diffDays = (currentMonthDueDate - disbursementTime) / (1000 * 60 * 60 * 24);
-
-       if (diffDays < 20) continue; // Skip if loan < 20 days old
-       ...
-    }
-    // --- LEGACY LOGIC END ---
-    */
+    // ----------------------------------------------------------------
+    // PART 1: APPLY NEW PENALTIES
+    // ----------------------------------------------------------------
 
     // Query: Fetch all Active Loans with their specific penalty rules and borrower names
     const [activeLoans] = await connection.query(
@@ -72,20 +53,13 @@ exports.checkDailyPenalties = async () => {
       const penaltyDay = Number(loan.penalty_settings_day) || Number(settings.penalty_days) || 5;
 
       // 1-Month Rule: A loan must have completed at least 30 days of borrowing
-      // before it becomes eligible for late fee penalties.
       const IST_OFFSET = 5.5 * 60 * 60 * 1000;
       const disbursementTime = new Date(loan.disbursement_date).getTime() + IST_OFFSET;
       const nowTime = today.getTime() + IST_OFFSET;
       const ageInDays = (nowTime - disbursementTime) / (1000 * 60 * 60 * 24);
 
-      if (ageInDays < 30) {
-        continue;
-      }
-
-      // Grace Period Check: If today is on or before the penalty day, skip
-      if (dayOfMonth <= penaltyDay) {
-        continue;
-      }
+      if (ageInDays < 30) continue;
+      if (dayOfMonth <= penaltyDay) continue; // Grace Period Check
 
       // Query: Check if Interest or EMI payment exists for current month
       const [payments] = await connection.query(
@@ -96,24 +70,19 @@ exports.checkDailyPenalties = async () => {
         [loan.loan_id, currentMonthStart, currentMonthEnd]
       );
 
-      if (payments.length > 0) {
-        continue;
-      }
+      if (payments.length > 0) continue;
 
       // Apply penalties for missed days from penaltyDay + 1 to today
       const startDay = penaltyDay + 1;
       const endDay = dayOfMonth;
 
-      // Maturity Date: The first day a loan is actually liable for interest/penalties
+      // Maturity Date: The first day a loan is actually liable
       const maturityDate = new Date(disbursementTime + 30 * 24 * 60 * 60 * 1000);
 
       for (let d = startDay; d <= endDay; d++) {
         const checkDate = new Date(today.getFullYear(), today.getMonth(), d);
 
-        // Logical Check: Penalty date MUST be after the 30-day maturity period
-        if (checkDate <= maturityDate) {
-          continue;
-        }
+        if (checkDate <= maturityDate) continue;
 
         const year = checkDate.getFullYear();
         const month = String(checkDate.getMonth() + 1).padStart(2, '0');
@@ -130,47 +99,80 @@ exports.checkDailyPenalties = async () => {
         );
 
         if (existingPenalty.length === 0) {
+          // Initialize is_notification_sent to FALSE (0)
           await penaltyService.addPenalty({
             loan_id: loan.loan_id,
             amount: penaltyAmount,
             penalty_date: checkDateStr,
             reason: 'Automatic Late Fee (Daily)',
           });
-
-          // 1. Internal Notification
-          const notificationService = require('./notification.service');
-          await notificationService.createNotification({
-            title: '⚠️ Daily Penalty Applied',
-            message: `Penalty of ₹${penaltyAmount} applied to ${loan.full_name} (Loan #${loan.loan_id}) for late payment.`,
-            type: 'penalty',
-          });
-
-          // 2. Notify Borrower (Email & WhatsApp Plugin)
-          const messagingService = require('./messaging.service');
-          const [borrowerData] = await connection.query(
-            'SELECT email, mobile FROM borrowers WHERE borrower_id = ?',
-            [loan.borrower_id]
-          );
-          const borrower = borrowerData[0];
-
-          if (borrower) {
-            const subj = `⚠️ Alert: Daily Penalty Applied (#${loan.loan_id})`;
-            const msg = `Hello ${loan.full_name},\n\nA late fee penalty of ₹${penaltyAmount} has been added to your loan account today (${checkDateStr}) because the monthly payment is overdue.\n\nPlease clear your dues immediately to stop further daily penalties.`;
-
-            if (borrower.email) {
-              await messagingService.sendBorrowerEmail(borrower.email, subj, msg);
-            }
-            if (borrower.mobile) {
-              await messagingService.sendWhatsAppNotification(borrower.mobile, msg);
-            }
-          }
-
           penaltyCount++;
         }
       }
     }
 
-    return { success: true, penaltiesApplied: penaltyCount };
+    // ----------------------------------------------------------------
+    // PART 2: RETRY FAILED NOTIFICATIONS (The "Guarantee" Logic)
+    // ----------------------------------------------------------------
+
+    console.log('🔄 Checking for pending penalty notifications...');
+
+    // Fetch penalties that are NOT yet notified (is_notification_sent = 0)
+    // Joined with borrower info to send the message
+    const [pendingNotifications] = await connection.query(`
+      SELECT p.penalty_id, p.loan_id, p.penalty_amount, p.penalty_date,
+             b.full_name, b.email, b.mobile
+      FROM penalties p
+      JOIN loans l ON p.loan_id = l.loan_id
+      JOIN borrowers b ON l.borrower_id = b.borrower_id
+      WHERE p.is_notification_sent = 0
+    `);
+
+    let notifiedCount = 0;
+    const notificationService = require('./notification.service');
+    const messagingService = require('./messaging.service');
+
+    for (const penalty of pendingNotifications) {
+      try {
+        const penaltyDateStr = new Date(penalty.penalty_date).toISOString().split('T')[0];
+        const subj = `⚠️ Alert: Daily Penalty Applied (#${penalty.loan_id})`;
+        const msg = `Hello ${penalty.full_name},\n\nA late fee penalty of ₹${penalty.penalty_amount} was applied to your loan account for date ${penaltyDateStr} because the monthly payment is overdue.\n\nPlease clear your dues immediately to stop further daily penalties.`;
+
+        // 1. Internal Notification (System Dashboard)
+        await notificationService.createNotification({
+          title: '⚠️ Daily Penalty Applied',
+          message: `Penalty of ₹${penalty.penalty_amount} applied to ${penalty.full_name} (Loan #${penalty.loan_id}). Notified successfully.`,
+          type: 'penalty',
+        });
+
+        // 2. Notify Borrower (Email)
+        if (penalty.email) {
+          await messagingService.sendBorrowerEmail(penalty.email, subj, msg);
+        }
+
+        // 3. Notify Borrower (WhatsApp)
+        if (penalty.mobile) {
+          await messagingService.sendWhatsAppNotification(penalty.mobile, msg);
+        }
+
+        // ✅ MARK AS SENT
+        await connection.query(
+          'UPDATE penalties SET is_notification_sent = 1 WHERE penalty_id = ?',
+          [penalty.penalty_id]
+        );
+        notifiedCount++;
+      } catch (notifyErr) {
+        console.error(`❌ Failed to notify penalty #${penalty.penalty_id}:`, notifyErr.message);
+        // We do NOT update 'is_notification_sent'. It remains 0.
+        // It will be retried automatically next time this script runs.
+      }
+    }
+
+    return {
+      success: true,
+      penaltiesApplied: penaltyCount,
+      notificationsSent: notifiedCount,
+    };
   } catch (err) {
     console.error('❌ Auto Penalty Error:', err);
     throw err;

@@ -71,28 +71,34 @@ exports.initSettings = async () => {
       ['users.delete', 'Users', 'Delete Users'],
     ];
 
-    for (const [code, cat, desc] of defaultPermissions) {
+    // Batch Insert Permissions (Optimize: 1 query instead of 20+)
+    if (defaultPermissions.length > 0) {
+      const permissionValues = defaultPermissions.map(([code, cat, desc]) => [code, cat, desc]);
       await connection.query(
-        'INSERT IGNORE INTO permissions (permission_code, category, description) VALUES (?, ?, ?)',
-        [code, cat, desc]
+        'INSERT IGNORE INTO permissions (permission_code, category, description) VALUES ?',
+        [permissionValues]
       );
     }
 
     // Seed Default Role Assigments (If empty)
     const [existingRolePerms] = await connection.query('SELECT 1 FROM role_permissions LIMIT 1');
     if (existingRolePerms.length === 0) {
-      // ADMIN Defaults (Everything except arguably nuclear options, but typically everything)
+      // ADMIN Defaults
       const adminPerms = defaultPermissions.map((p) => p[0]);
-      // STAFF Defaults (View/Create/Edit, no Delete)
+      // STAFF Defaults
       const staffPerms = adminPerms.filter((p) => !p.includes('delete') && !p.includes('settings'));
 
-      for (const p of adminPerms) {
-        await connection.query("INSERT IGNORE INTO role_permissions VALUES ('ADMIN', ?)", [p]);
+      const rolePermValues = [];
+      adminPerms.forEach((p) => rolePermValues.push(['ADMIN', p]));
+      staffPerms.forEach((p) => rolePermValues.push(['STAFF', p]));
+
+      if (rolePermValues.length > 0) {
+        await connection.query(
+          'INSERT IGNORE INTO role_permissions (role, permission_code) VALUES ?',
+          [rolePermValues]
+        );
       }
-      for (const p of staffPerms) {
-        await connection.query("INSERT IGNORE INTO role_permissions VALUES ('STAFF', ?)", [p]);
-      }
-      console.log('✅ RBAC tables initialized and seeded');
+      console.log('✅ RBAC tables initialized and seeded (Fast Batch Mode)');
     }
   } catch (err) {
     console.error('❌ Failed to init settings:', err);

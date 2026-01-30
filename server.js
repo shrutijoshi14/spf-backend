@@ -21,10 +21,10 @@ app.use(helmet());
 // 🛡️ 2. Stricter CORS
 // 🛡️ 2. Stricter CORS
 const corsOptions = {
-  origin: true, // Reflects the request origin, allowing all
+  origin: '*', // Allow ALL origins (Public API style)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,
+  credentials: false, // Disable credentials to allow wildcard origin
 };
 app.use(cors(corsOptions));
 
@@ -92,6 +92,10 @@ const startServer = async () => {
     const notificationService = require('./services/notification.service');
     const automaticPenaltyService = require('./services/automaticPenalty.service');
     const automaticRemindersService = require('./services/automaticReminders.service');
+    const dbMigration = require('./services/dbMigration.service');
+
+    // 0. Run Database Migrations (Background - Don't Block Startup)
+    dbMigration.runMigrations().catch((err) => console.error('Migration Failed:', err));
 
     // Run initialization in background (Don't await) to speed up Cold Start
     settingsService.initSettings().catch((err) => console.error('Init Settings Failed:', err));
