@@ -6,6 +6,7 @@
   "scripts": {
     "start": "nodemon server.js",
     "vercel-start": "node server.js",
+    "deploy": "vercel --prod",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -26,5 +27,8 @@
     "node-cron": "^4.2.1",
     "nodemailer": "^7.0.12",
     "nodemon": "^3.1.11"
+  },
+  "devDependencies": {
+    "vercel": "^50.9.3"
   }
 }

@@ -19,10 +19,11 @@ const app = express();
 app.use(helmet());
 
 // 🛡️ 2. Stricter CORS
+// 🛡️ 2. Stricter CORS
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || '*', // In production, replace * with your domain
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: true, // Reflects the request origin, allowing all
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
 };
 app.use(cors(corsOptions));
@@ -92,8 +93,11 @@ const startServer = async () => {
     const automaticPenaltyService = require('./services/automaticPenalty.service');
     const automaticRemindersService = require('./services/automaticReminders.service');
 
-    await settingsService.initSettings();
-    await notificationService.initNotifications();
+    // Run initialization in background (Don't await) to speed up Cold Start
+    settingsService.initSettings().catch((err) => console.error('Init Settings Failed:', err));
+    notificationService
+      .initNotifications()
+      .catch((err) => console.error('Init Notifications Failed:', err));
 
     const cron = require('node-cron');
     console.log('⏰ Initializing Scheduler...');

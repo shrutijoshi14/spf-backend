@@ -10,7 +10,7 @@ const db = mysql
     database: process.env.DB_NAME || process.env.MYSQL_ADDON_DB,
     port: process.env.DB_PORT || process.env.MYSQL_ADDON_PORT || 3306,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 1, // Reduced to 1 to fit free plan limit of 5
     queueLimit: 0,
   })
   .promise(); // ✅ Use Promise API
