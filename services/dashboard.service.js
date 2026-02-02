@@ -23,7 +23,7 @@ exports.getDashboardStats = async () => {
 
     // 2. Payments
     const [paymentSum] = await connection.query(
-      'SELECT SUM(payment_amount) as total FROM payments'
+      'SELECT SUM(p.payment_amount) as total FROM payments p JOIN loans l ON p.loan_id = l.loan_id WHERE l.status != "DELETED"'
     );
 
     // 3. Charts Data - Monthly Interest Payable by Borrower (Based on Active Loans)
@@ -33,7 +33,7 @@ exports.getDashboardStats = async () => {
         SUM(ROUND(l.principal_amount * l.interest_rate / 100)) as total
       FROM loans l
       JOIN borrowers b ON l.borrower_id = b.borrower_id
-      WHERE l.status = 'ACTIVE'
+      WHERE l.status = 'ACTIVE' AND b.status != 'DISABLED'
       GROUP BY b.borrower_id, b.full_name
       ORDER BY total DESC
     `);
@@ -48,6 +48,7 @@ exports.getDashboardStats = async () => {
       FROM payments p
       JOIN loans l ON p.loan_id = l.loan_id
       JOIN borrowers b ON l.borrower_id = b.borrower_id
+      WHERE l.status != 'DELETED' AND b.status != 'DISABLED'
       GROUP BY b.borrower_id, b.full_name
       ORDER BY total DESC
     `);
@@ -71,6 +72,7 @@ exports.getDashboardStats = async () => {
       FROM payments p
       JOIN loans l ON p.loan_id = l.loan_id
       JOIN borrowers b ON l.borrower_id = b.borrower_id
+      WHERE l.status != 'DELETED' AND b.status != 'DISABLED'
       ORDER BY p.payment_id DESC LIMIT 5
     `);
 
@@ -79,7 +81,9 @@ exports.getDashboardStats = async () => {
       SELECT
         COALESCE(SUM(penalty_amount), 0) as total_penalties,
         COALESCE(SUM(CASE WHEN penalty_date = CURDATE() THEN penalty_amount ELSE 0 END), 0) as today_penalties
-      FROM penalties
+      FROM penalties p
+      JOIN loans l ON p.loan_id = l.loan_id
+      WHERE l.status != 'DELETED'
     `);
 
     // 6. Upcoming Payments (Loans due within 7 days)
@@ -118,6 +122,7 @@ exports.getDashboardStats = async () => {
       FROM loan_topups t
       JOIN loans l ON t.loan_id = l.loan_id
       JOIN borrowers b ON l.borrower_id = b.borrower_id
+      WHERE l.status != 'DELETED' AND b.status != 'DISABLED'
       ORDER BY t.topup_id DESC LIMIT 5
     `);
 
@@ -128,6 +133,7 @@ exports.getDashboardStats = async () => {
       FROM penalties p
       JOIN loans l ON p.loan_id = l.loan_id
       JOIN borrowers b ON l.borrower_id = b.borrower_id
+      WHERE l.status != 'DELETED' AND b.status != 'DISABLED'
       ORDER BY p.penalty_id DESC LIMIT 5
     `);
 
@@ -261,6 +267,7 @@ exports.getAllHistory = async (page = 1, limit = 20, search = '') => {
         FROM payments p
         JOIN loans l ON p.loan_id = l.loan_id
         JOIN borrowers b ON l.borrower_id = b.borrower_id
+        WHERE l.status != 'DELETED'
 
         UNION ALL
 
@@ -274,6 +281,7 @@ exports.getAllHistory = async (page = 1, limit = 20, search = '') => {
         FROM penalties pe
         JOIN loans l ON pe.loan_id = l.loan_id
         JOIN borrowers b ON l.borrower_id = b.borrower_id
+        WHERE l.status != 'DELETED'
 
         UNION ALL
 
@@ -287,6 +295,7 @@ exports.getAllHistory = async (page = 1, limit = 20, search = '') => {
         FROM loan_topups t
         JOIN loans l ON t.loan_id = l.loan_id
         JOIN borrowers b ON b.borrower_id = l.borrower_id
+        WHERE l.status != 'DELETED'
 
         UNION ALL
 
@@ -316,12 +325,15 @@ exports.getAllHistory = async (page = 1, limit = 20, search = '') => {
         UNION ALL
         SELECT b.full_name, CONCAT('Payment (', p.payment_for, ') from ', b.full_name) as description
         FROM payments p JOIN loans l ON p.loan_id = l.loan_id JOIN borrowers b ON l.borrower_id = b.borrower_id
+        WHERE l.status != 'DELETED'
         UNION ALL
         SELECT b.full_name, CONCAT('Penalty: ', pe.reason, ' (', b.full_name, ')') as description
         FROM penalties pe JOIN loans l ON pe.loan_id = l.loan_id JOIN borrowers b ON l.borrower_id = b.borrower_id
+        WHERE l.status != 'DELETED'
         UNION ALL
         SELECT b.full_name, CONCAT('Top-up for ', b.full_name) as description
         FROM loan_topups t JOIN loans l ON t.loan_id = l.loan_id JOIN borrowers b ON l.borrower_id = b.borrower_id
+        WHERE l.status != 'DELETED'
         UNION ALL
         SELECT full_name, CONCAT('New Borrower: ', full_name) as description
         FROM borrowers

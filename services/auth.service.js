@@ -142,24 +142,19 @@ exports.login = async ({ email, password }) => {
     console.error('⚠️ Failed to update last_login:', err.message)
   );
 
-  // Check if any SuperAdmin exists in the system (Only if current user isn't one)
+  // Check if any SuperAdmin exists in the system
   if (user.role !== 'SUPERADMIN') {
-    // We intentionally don't await this to speed up login.
-    // However, since Vercel might freeze the lambda, we wrap it in a promise but don't block the return.
-    // Ideally, for Critical logic like this, we SHOULD await, but for resolving 504s, we'll make it best-effort.
-    // Actually, let's keep it awaited but simple? No, let's allow the login to proceed.
-    // The "First SuperAdmin" logic is a one-time setup thing. It shouldn't block every login.
-    (async () => {
-      try {
-        const [superAdmins] = await db.query("SELECT user_id FROM users WHERE role = 'SUPERADMIN'");
-        if (superAdmins.length === 0) {
-          await db.query("UPDATE users SET role = 'SUPERADMIN' WHERE user_id = ?", [user.user_id]);
-          console.log(`👑 User ${user.user_id} promoted to SuperAdmin`);
-        }
-      } catch (err) {
-        console.error('⚠️ Failed to check/promote SuperAdmin:', err.message);
+    try {
+      const [superAdmins] = await db.query("SELECT user_id FROM users WHERE role = 'SUPERADMIN'");
+      if (superAdmins.length === 0) {
+        // Promote current user to SUPERADMIN
+        await db.query("UPDATE users SET role = 'SUPERADMIN' WHERE user_id = ?", [user.user_id]);
+        user.role = 'SUPERADMIN'; // Update local object so token gets correct role immediately
+        console.log(`👑 User ${user.user_id} promoted to SuperAdmin`);
       }
-    })();
+    } catch (err) {
+      console.error('⚠️ Failed to check/promote SuperAdmin:', err.message);
+    }
   }
 
   const token = generateToken(user);

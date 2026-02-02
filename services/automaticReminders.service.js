@@ -104,9 +104,15 @@ exports.checkReminders = async () => {
         await messagingService.sendBorrowerEmail(loan.email, subject, message);
       }
 
-      // 3. Send WhatsApp (Automatic Placeholder)
+      // 3. Send WhatsApp via Template (Required for one-way / business-initiated)
       if (loan.mobile) {
-        await messagingService.sendWhatsAppNotification(loan.mobile, message);
+        // Template Name: 'payment_reminder' (You must create this in Meta Dashboard)
+        // Variables: {{1}}=Name, {{2}}=Amount, {{3}}=Date
+        await messagingService.sendWhatsAppTemplate(loan.mobile, 'payment_reminder', 'en_US', [
+          { type: 'text', text: loan.borrower_name },
+          { type: 'text', text: `₹${totalDueNow.toFixed(2)}` },
+          { type: 'text', text: dueDateThisMonth.toDateString() },
+        ]);
       }
 
       sentCount++;

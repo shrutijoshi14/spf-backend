@@ -30,6 +30,14 @@ exports.checkDailyPenalties = async () => {
     .toISOString()
     .split('T')[0];
 
+  // Added Logic: Last Month Check
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+    .toISOString()
+    .split('T')[0];
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0)
+    .toISOString()
+    .split('T')[0];
+
   const connection = await db.getConnection();
   try {
     // ----------------------------------------------------------------
@@ -59,7 +67,28 @@ exports.checkDailyPenalties = async () => {
       const ageInDays = (nowTime - disbursementTime) / (1000 * 60 * 60 * 24);
 
       if (ageInDays < 30) continue;
-      if (dayOfMonth <= penaltyDay) continue; // Grace Period Check
+
+      // Maturity Date: The first day a loan is actually liable
+      const maturityDate = new Date(disbursementTime + 30 * 24 * 60 * 60 * 1000);
+
+      // --- CONTINUOUS PENALTY CHECK ---
+      let startDay = penaltyDay + 1;
+      let bypassGracePeriod = false;
+
+      // Check if loan was mature last month and unpaid
+      if (maturityDate < new Date(lastMonthEnd)) {
+        const [lastMonthPay] = await connection.query(
+          `SELECT payment_id FROM payments WHERE loan_id = ? AND payment_date BETWEEN ? AND ? AND payment_for IN ('INTEREST', 'EMI') LIMIT 1`,
+          [loan.loan_id, lastMonthStart, lastMonthEnd]
+        );
+
+        if (lastMonthPay.length === 0) {
+          bypassGracePeriod = true;
+          startDay = 1;
+        }
+      }
+
+      if (!bypassGracePeriod && dayOfMonth <= penaltyDay) continue; // Grace Period Check
 
       // Query: Check if Interest or EMI payment exists for current month
       const [payments] = await connection.query(
@@ -72,12 +101,10 @@ exports.checkDailyPenalties = async () => {
 
       if (payments.length > 0) continue;
 
-      // Apply penalties for missed days from penaltyDay + 1 to today
-      const startDay = penaltyDay + 1;
-      const endDay = dayOfMonth;
+      // Apply penalties for missed days from startDay to today
 
-      // Maturity Date: The first day a loan is actually liable
-      const maturityDate = new Date(disbursementTime + 30 * 24 * 60 * 60 * 1000);
+      // Apply penalties for missed days from startDay to today
+      const endDay = dayOfMonth;
 
       for (let d = startDay; d <= endDay; d++) {
         const checkDate = new Date(today.getFullYear(), today.getMonth(), d);
@@ -150,9 +177,15 @@ exports.checkDailyPenalties = async () => {
           await messagingService.sendBorrowerEmail(penalty.email, subj, msg);
         }
 
-        // 3. Notify Borrower (WhatsApp)
+        // 3. Notify Borrower (WhatsApp Template)
         if (penalty.mobile) {
-          await messagingService.sendWhatsAppNotification(penalty.mobile, msg);
+          // Template Name: 'penalty_alert'
+          // Variables: {{1}}=Name, {{2}}=Amount, {{3}}=Date
+          await messagingService.sendWhatsAppTemplate(penalty.mobile, 'penalty_alert', 'en_US', [
+            { type: 'text', text: penalty.full_name },
+            { type: 'text', text: `₹${penalty.penalty_amount}` },
+            { type: 'text', text: penaltyDateStr },
+          ]);
         }
 
         // ✅ MARK AS SENT

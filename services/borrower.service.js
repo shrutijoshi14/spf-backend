@@ -165,25 +165,19 @@ exports.remove = async (id) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Get associated Loan IDs
-    const [loans] = await connection.query('SELECT loan_id FROM loans WHERE borrower_id = ?', [id]);
-    const loanIds = loans.map((l) => l.loan_id);
-
-    // Soft Delete: Disable borrower and mark loans as DELETED
-
-    if (loanIds.length > 0) {
-      // Mark associated loans as DELETED
-      await connection.query('UPDATE loans SET status = "DELETED" WHERE borrower_id = ?', [id]);
-      // Note: We are keeping the payments/topups/penalties as is for history,
-      // but since the loan is deleted, they won't show up in standard views.
-    }
-
-    // 4. Soft Delete (Disable) Borrower
-    // Disable Borrower
-
+    // 1. Soft Delete (Disable) Borrower
     await connection.query('UPDATE borrowers SET status = "DISABLED" WHERE borrower_id = ?', [id]);
 
+    // 2. Soft Delete associated Loans
+    // We update them to DELETED so they disappear from active lists
+    await connection.query('UPDATE loans SET status = "DELETED" WHERE borrower_id = ?', [id]);
+
+    // Note: We DO NOT touch payments/penalties/topups.
+    // They remain in DB for historical integrity if restored,
+    // but won't be visible in standard views because the parent Loan is DELETED.
+
     await connection.commit();
+    return true;
   } catch (error) {
     await connection.rollback();
     throw error;

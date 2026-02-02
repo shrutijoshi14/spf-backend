@@ -58,12 +58,13 @@ exports.initSettings = async () => {
       ['payment.create', 'Payments', 'Add Payments'],
       ['payment.edit', 'Payments', 'Edit Payments'],
       ['payment.delete', 'Payments', 'Delete Payments'], // Admin only
+      ['payment.override', 'Payments', 'Override Payment Allocation'], // Admin only
       // Reports
       ['reports.view', 'Reports', 'View Reports'],
       // Settings
       ['settings.view', 'Settings', 'View Settings'],
       ['settings.edit', 'Settings', 'Edit System Config'], // Admin only
-      ['settings.edit', 'Settings', 'Edit System Config'], // Admin only
+      ['settings.edit_penalty', 'Settings', 'Edit Global Penalty Rules'], // SuperAdmin only
       // User Management
       ['users.view', 'Users', 'View Users'],
       ['users.manage_role', 'Users', 'Change User Role'],
@@ -86,10 +87,20 @@ exports.initSettings = async () => {
       // ADMIN Defaults
       const adminPerms = defaultPermissions.map((p) => p[0]);
       // STAFF Defaults
-      const staffPerms = adminPerms.filter((p) => !p.includes('delete') && !p.includes('settings'));
+      const staffPerms = adminPerms.filter(
+        (p) =>
+          !p.includes('delete') &&
+          !p.includes('settings') &&
+          !p.includes('override') &&
+          !p.includes('approve')
+      );
 
       const rolePermValues = [];
       adminPerms.forEach((p) => rolePermValues.push(['ADMIN', p]));
+      // Explicitly give logic for SUPERADMIN in case it's manually added later, though typical flow promotes user.
+      // Ideally, SUPERADMIN has everything.
+      adminPerms.forEach((p) => rolePermValues.push(['SUPERADMIN', p]));
+
       staffPerms.forEach((p) => rolePermValues.push(['STAFF', p]));
 
       if (rolePermValues.length > 0) {

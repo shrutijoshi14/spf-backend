@@ -19,7 +19,6 @@ const app = express();
 app.use(helmet());
 
 // 🛡️ 2. Stricter CORS
-// 🛡️ 2. Stricter CORS
 const corsOptions = {
   origin: '*', // Allow ALL origins (Public API style)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -33,7 +32,7 @@ app.use(express.json({ limit: '10kb' })); // Limit body size to prevent DoS
 // 🛡️ 3. Rate Limiting (Prevent Brute Force)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  max: 1000, // Increased limit for dev/testing
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -67,6 +66,7 @@ app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/settings', require('./routes/settings.routes'));
 app.use('/api/reports', require('./routes/reports.routes'));
 app.use('/api/users', require('./routes/user.routes'));
+app.use('/api/trash', require('./routes/trash.routes'));
 
 // 🛡️ 4. Global Error Handler (Centralized)
 app.use((err, req, res, next) => {
@@ -93,12 +93,14 @@ const startServer = async () => {
     const automaticPenaltyService = require('./services/automaticPenalty.service');
     const automaticRemindersService = require('./services/automaticReminders.service');
     const dbMigration = require('./services/dbMigration.service');
+    const auditService = require('./services/audit.service');
 
     // 0. Run Database Migrations (Background - Don't Block Startup)
     dbMigration.runMigrations().catch((err) => console.error('Migration Failed:', err));
 
     // Run initialization in background (Don't await) to speed up Cold Start
     settingsService.initSettings().catch((err) => console.error('Init Settings Failed:', err));
+    auditService.initAuditLogTable().catch((err) => console.error('Init Audit Failed:', err));
     notificationService
       .initNotifications()
       .catch((err) => console.error('Init Notifications Failed:', err));

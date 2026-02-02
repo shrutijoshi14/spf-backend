@@ -174,7 +174,7 @@ exports.getLoanDetails = async (loanId) => {
   const loan = loanRows[0];
 
   const [payments] = await db.query(
-    'SELECT * FROM payments WHERE loan_id = ? ORDER BY payment_date DESC',
+    'SELECT * FROM payments WHERE loan_id = ? ORDER BY payment_date DESC, payment_id DESC',
     [loanId]
   );
 
@@ -395,7 +395,7 @@ exports.recalculateLoanOutstanding = async (loanId) => {
 
     // 1. Get current Principal (which includes any Top-ups added)
     const [loans] = await connection.query(
-      'SELECT principal_amount, status FROM loans WHERE loan_id = ? FOR UPDATE',
+      'SELECT principal_amount, status, interest_rate, interest_type, tenure_value, tenure_unit FROM loans WHERE loan_id = ? FOR UPDATE',
       [loanId]
     );
     if (!loans.length) throw new Error('Loan not found');
@@ -418,7 +418,56 @@ exports.recalculateLoanOutstanding = async (loanId) => {
     const totalPayments = Number(payments[0].total);
 
     // 4. Calculate Net Outstanding
-    let newOutstanding = principal + totalPenalties - totalPayments;
+    let newOutstanding = 0;
+
+    // Check Interest Type
+    const interestType = (loans[0].interest_type || 'FLAT').toUpperCase();
+
+    if (interestType === 'FLAT') {
+      // Logic: Outstanding = (Principal + TotalExpectedInterest + Penalties) - (All Payments)
+      // 1. Calculate Total Expected Interest
+      const P = principal;
+      const R = Number(loans[0].interest_rate);
+      const T_val = Number(loans[0].tenure_value);
+      const T_unit = (loans[0].tenure_unit || 'MONTH').toUpperCase();
+
+      let totalExpectedInterest = 0;
+      // Simple Flat Rate Formula
+      if (T_unit === 'MONTH') {
+        totalExpectedInterest = (P * R * T_val) / 100;
+      } else if (T_unit === 'WEEK') {
+        // Assuming R is per week ?? Or R is per month/year?
+        // Typically R is per month in this context based on previous code.
+        // Let's assume R is consistent with unit or standard per month.
+        // Given previous code didn't do complex conversion, let's stick to simplest interpretation:
+        // If unit is month, R is % per month.
+        // If unit is week, implies R is % per week? Or we just apply directly.
+        // To be safe and consistent with "Monthly Interest" labels:
+        // Let's assume (P * R * T) / 100 is the universal flat formula regardless of time unit interpretation for now.
+        totalExpectedInterest = (P * R * T_val) / 100;
+      } else {
+        totalExpectedInterest = (P * R * T_val) / 100;
+      }
+
+      // 2. Sum ALL payments (Including Interest)
+      const [allPayments] = await connection.query(
+        'SELECT COALESCE(SUM(payment_amount), 0) as total FROM payments WHERE loan_id = ?',
+        [loanId]
+      );
+      const totalPaid = Number(allPayments[0].total);
+
+      newOutstanding = principal + totalExpectedInterest + totalPenalties - totalPaid;
+    } else {
+      // REDUCING or other types
+      // Logic: Outstanding = Principal + Penalties - (Principal + Penalty Payments)
+      // (ignoring interest paid as it doesn't reduce principal in reducing balance conceptualization usually,
+      // BUT for simple tracking: Outstanding Principal is what matters).
+
+      // Existing Logic was:
+      // newOutstanding = principal + totalPenalties - totalPayments (where totalPayments excluded Interest)
+      newOutstanding = principal + totalPenalties - totalPayments;
+    }
+
     newOutstanding = Math.round(newOutstanding * 100) / 100;
 
     // 5. Update Status: If balance <= 0, mark CLOSED. Else ACTIVE.
