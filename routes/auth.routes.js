@@ -129,7 +129,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/auth.controller');
-const authenticate = require('../middleware/authenticate');
+const { authenticate, authorize } = require('../middleware/authenticate');
 const {
   validateSignup,
   validateLogin,

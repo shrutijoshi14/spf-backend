@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const topupController = require('../controllers/topup.controller');
-const authenticate = require('../middleware/authenticate');
+const { authenticate } = require('../middleware/authenticate');
 const checkPermission = require('../middleware/checkPermission');
 
 // ✅ Create Top-up

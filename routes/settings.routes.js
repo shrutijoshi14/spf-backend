@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const settingsController = require('../controllers/settings.controller');
-const authenticate = require('../middleware/authenticate');
+const { authenticate } = require('../middleware/authenticate');
 
 router.get('/', authenticate, settingsController.getSettings);
 router.post('/', authenticate, settingsController.updateSettings);

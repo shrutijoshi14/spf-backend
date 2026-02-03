@@ -69,6 +69,41 @@ exports.updateUserRole = async (req, res) => {
   }
 };
 
+exports.updateUserDetails = async (req, res) => {
+  const { userId } = req.params;
+  const { full_name, email, mobile } = req.body;
+
+  try {
+    // Only SuperAdmin or the user themselves should be able to update?
+    // Requirement says SuperAdmin manages users.
+    if (req.user.role !== 'SUPERADMIN' && req.user.userId !== parseInt(userId)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // Check unique email if changing
+    if (email) {
+      const [existing] = await db.query(
+        'SELECT user_id FROM users WHERE email = ? AND user_id != ?',
+        [email, userId]
+      );
+      if (existing.length > 0) {
+        return res.status(400).json({ success: false, message: 'Email already in use' });
+      }
+    }
+
+    await db.query('UPDATE users SET full_name = ?, email = ?, mobile = ? WHERE user_id = ?', [
+      full_name,
+      email,
+      mobile,
+      userId,
+    ]);
+
+    res.status(200).json({ success: true, message: 'User details updated successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.deleteUser = async (req, res) => {
   const { userId } = req.params;
 

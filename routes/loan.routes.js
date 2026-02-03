@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const loanController = require('../controllers/loan.controller');
-const authenticate = require('../middleware/authenticate');
+const { authenticate } = require('../middleware/authenticate');
 const checkPermission = require('../middleware/checkPermission');
 const { validateCreateLoan } = require('../validators/loan.validator');
 
